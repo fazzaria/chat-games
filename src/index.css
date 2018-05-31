@@ -1,0 +1,29 @@
+.messageScroller {
+  overflow-y: scroll;
+  height: calc(60vh - 96px);
+  width: 100%;
+}
+.bottomPanel {
+  overflow-y: scroll;
+  height: calc(40vh - 96px);
+  width: 100%;
+}
+.list-group-item-action {
+  cursor: pointer;
+}
+.btn-group-justified {
+  display: flex;
+  .btn {
+    flex-grow: 1;  
+  }
+}
+.cursor-pointer {
+  cursor: pointer;
+}
+.breakWord {
+  word-wrap: break-word;
+}
+.homepage-alert {
+  z-index: 9999;
+  width: 100%;
+}
