@@ -1,12 +1,52 @@
 const gameTypes = require('./config.js').gameTypes;
 const gameOptions = require('./config.js').gameOptions;
+const io = require('../server.js').io;
 
-module.exports.isSockpuppet(gameType, socket1, socket2) {
+module.exports = {
+  roomExists,
+  getRoomcode,
+  processRoomCode,
+  isSockpuppet,
+  initializeSocketData,
+  initializeRoomData,
+  generateRoomName,
+  generateDisplayName,
+  refreshPublicRooms,
+  createRoom,
+  joinRoom,
+  exitRoom
+};
+
+function roomExists(roomCode) {
+  return !!io.sockets.adapter.rooms[roomCode];
+}
+
+function getRoomcode() {
+  for (var code in socket.rooms) {
+    if (code != socket.id) return code;
+  }
+}
+
+function processRoomCode(gameType, roomCode) {
+  const store = require('./store.js')[gameType];
+  if (gameType === gameTypes.SWF) {
+    roomCode.toLowerCase();
+    roomCode = roomCode.replace(/ /g, '-');
+    return roomCode;
+  }
+  if (gameType === gameTypes.OWS) {
+    roomCode.toUpperCase();
+    roomCode = roomCode.replace(/ /g, '');
+    return roomCode;
+  }
+}
+
+function isSockpuppet(gameType, socket1, socket2) {
   if (gameOptions[gameType].allowSockPuppets) return false;
   return connectedIPs[socket1.id] === connectedIPs[socket2.id];
 }
 
-module.exports.initializeSocketData = function(gameType, socket, preexistingSocket) {
+function initializeSocketData(gameType, socket, preexistingSocket) {
   socket._gameType = gameType;
   socket._displayName = '';
   if (gameType === gameTypes.SWF) {
@@ -20,9 +60,9 @@ module.exports.initializeSocketData = function(gameType, socket, preexistingSock
     socket._ready = false;
     return socket;
   }
-};
+}
 
-module.exports.initializeRoomData = function(gameType, room, options) {
+function initializeRoomData(gameType, room, options) {
   room._gameType = gameType;
   room._isPublic = options.isPublic;
   room._players = [];
@@ -37,9 +77,9 @@ module.exports.initializeRoomData = function(gameType, room, options) {
   }
   if (gameType === gameTypes.OWS) {
   }
-};
+}
 
-module.exports.generatePublicRoomName = function(gameType, options) {
+function generateRoomName(gameType, options) {
   const store = require('./store.js')[gameType];
   if (gameType === gameTypes.SWF) {
     var name = '';
@@ -57,9 +97,9 @@ module.exports.generatePublicRoomName = function(gameType, options) {
     var name = Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, 4).toUpperCase();
     return {name: name};
   }
-};
+}
 
-module.exports.generateDisplayName = function(gameType) {
+function generateDisplayName(gameType) {
   const store = require('./store.js')[gameType];
   if (gameType === gameTypes.SWF) {
     var name = store.lastNames[Math.floor(Math.random() * store.lastNames.length)];
@@ -70,4 +110,79 @@ module.exports.generateDisplayName = function(gameType) {
     }
     return {name: name};  
   }
-};
+}
+
+function refreshPublicRooms(gameType) {
+  var players = [];
+  var publicRooms = [];
+  for (var r in io.sockets.adapter.rooms) {
+    if (r._isPublic && r._gameType === gameType) {
+      publicRooms[r] = r._players.length;
+      for (var i = 0; i < r._players.length; i++) {
+        players.push(r._players[i]);
+      }
+    }
+  }
+
+  var sockets = io.sockets.sockets;
+  for (var id in sockets) {
+    if (sockets[id]._gameType === gameType && players.indexOf(id) === -1) {
+      socket.emit('roomData', {publicRooms});
+    }
+  }
+}
+
+function createRoom(gameType, options) {
+  var roomsNumber = 0;
+  for (var r in io.sockets.adapter.rooms) if (r._gameType === gameType) roomsNumber++;
+  if (roomsNumber >= gameOptions[gameType].maxRooms) {
+    socket.emit('warning', 'No new rooms can be created at this time.');
+    return false;
+  }
+  var exists = true;
+  var name = {};
+  while (exists) {
+    name = generateRoomName();
+    exists = roomExists(name.name);
+  }
+  var roomCode = name.name;
+  initializeSocketData(gameType, socket);
+  //two join methods?
+  socket.join(roomCode);
+  var room = io.sockets.adapter.rooms[roomCode];
+  initializeRoomData(gameType, room);
+  joinRoom(roomCode, success);
+}
+
+function joinRoom(gameType, roomCode, options) {
+  if (!roomCode) {
+    socket.emit('warning', 'Please enter a name.');
+    return;
+  }
+  roomCode = processRoomCode(gameType, roomCode);
+  if (!roomExists(roomCode)) {
+    socket.emit('warning', 'No place found with that name.');
+    return;
+  }
+  var room = io.sockets.adapter.rooms[roomCode];
+  room._players.push(socket.id);
+  initializeSocketData(socket);
+  //inheritSocketData(roomCode);
+  socket.join(roomCode, ()=> {
+    var handleJoin = require('./games/' + gameType).handleJoin;
+    handleJoin(roomCode);
+    if (options.isPublic) refreshPublicRooms(gameType);
+  });
+}
+
+function exitRoom(gameType, roomCode) {
+  var roomCode = getRoomcode();
+  if (!roomCode) return;
+  if (!roomExists(roomCode)) return;
+
+  var room = io.sockets.adapter.rooms[roomCode];
+  var handleLeave = require('./games/' + gameType).handleLeave;
+  handleLeave(roomCode);
+  if (room._isPublic) refreshPublicRooms(gameType);
+  success();
+}
