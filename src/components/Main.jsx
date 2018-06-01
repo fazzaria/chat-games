@@ -14,7 +14,7 @@ class Main extends Component {
     this.state = {
       answer: '',
       chatInput: '',
-      confirmLeaveRoom: '',
+      confirmExitRoom: '',
       feedbackMsg: '',
       feedbackType: '',
       isAsker: false,
@@ -56,8 +56,8 @@ class Main extends Component {
   }
 
   componentDidMount() {
-    socket = io.connect(window.location.origin);
-    //socket = io.connect('localhost:8080');
+    //socket = io.connect(window.location.origin);
+    socket = io.connect('localhost:8080');
 
     socket.on('error', (err) => {
       if (this.state.roomCode) {
@@ -83,6 +83,23 @@ class Main extends Component {
         }
       }
       this.setState(stateObj);
+    });
+
+    socket.on('joinedRoom', (code) => {
+      this.setState({
+        isAsker: this.isAsker(),
+        roomCode: code 
+      });
+      this.clearAlert();
+    });
+
+    socket.on('createdRoom', (code) => {
+      this.setState({ 
+        isAsker: false,
+        roomCode: code,
+        showIsPublic: false
+      });
+      this.addRoomMessage({ text: 'New game started. Waiting for players...', cssClass: 'dark' });
     });
 
     socket.on('askerSelected', () => {
@@ -133,8 +150,25 @@ class Main extends Component {
       this.addRoomMessage({ text: 'Waiting for participants...', cssClass: 'dark' });
     });
 
+    socket.on('chatMessagePosted', () => {
+      this.setState({
+        chatInput: ''
+      });
+      this.focusInputs();
+    });
+
     socket.on('newChatMessage', (msg) => {
       this.addRoomMessage({text: msg});
+    });
+
+    socket.on('exitedRoom', () => {
+      clearTimeout(this.state.confirmExitRoom);
+      this.setState({
+        isAsker: false,
+        confirmExitRoom: false,
+        roomCode: '',
+        roomMessages: []
+      });
     });
 
     socket.on('lunarPhase', (phase) => { 
@@ -184,14 +218,7 @@ class Main extends Component {
         showIsPublic: true
       });
     } else {
-      socket.emit('createRoom', gameType, { isPublic }, (code) => {
-        this.setState({ 
-          isAsker: false,
-          roomCode: code,
-          showIsPublic: false
-        });
-        this.addRoomMessage({ text: 'New game started. Waiting for participants...', cssClass: 'dark' });
-      });
+      socket.emit('createRoom', gameType, { isPublic });
     }
   }
 
@@ -200,30 +227,16 @@ class Main extends Component {
       this.setAlert('Please enter a name.', 'warning', true);
       return;
     }
-    socket.emit('joinRoom', gameType, roomCode, (code) => {
-      this.setState({ 
-        isAsker: this.isAsker(),
-        roomCode: code 
-      });
-      this.clearAlert();
-    });
+    socket.emit('joinRoom', gameType, roomCode);
   }
 
   exitRoom() {
-    if (!this.state.confirmLeaveRoom) {
+    if (!this.state.confirmExitRoom) {
       this.setState({
-        confirmLeaveRoom: setTimeout(() => {this.setState({confirmLeaveRoom: false})}, 5000)
+        confirmExitRoom: setTimeout(() => {this.setState({confirmExitRoom: false})}, 5000)
       });
     } else {
-      socket.emit('exitRoom', () => {
-        clearTimeout(this.state.confirmLeaveRoom);
-        this.setState({
-          isAsker: false,
-          confirmLeaveRoom: false,
-          roomCode: '',
-          roomMessages: []
-        });
-      });  
+      socket.emit('exitRoom');  
     }
   }
 
@@ -281,12 +294,7 @@ class Main extends Component {
 
   postChatMessage(msg) {
     if (msg) {
-      socket.emit('postChatMessage', msg, () => {
-        this.setState({
-          chatInput: ''
-        });
-        this.focusInputs();
-      });
+      socket.emit('postChatMessage', msg);
     }
   }
 
@@ -345,7 +353,7 @@ class Main extends Component {
             <div>
               <div className='row'>
                 <div className='col'>
-                  <button type='button' className='btn btn-light btn-block btn-lg' onClick={this.exitRoom}>{this.state.confirmLeaveRoom ? 'Click again to confirm.' : 'Exit'}</button>
+                  <button type='button' className='btn btn-light btn-block btn-lg' onClick={this.exitRoom}>{this.state.confirmExitRoom ? 'Click again to confirm.' : 'Exit'}</button>
                 </div>
               </div>
               <div className='row'>

@@ -1,34 +1,26 @@
-const gameTypes = require('./config.js').gameTypes;
-const gameOptions = require('./config.js').gameOptions;
-const io = require('../server.js').io;
+const gameTypes = require('./config').gameTypes;
+const gameOptions = require('./config').gameOptions;
+const io = require('../server').io;
 
 module.exports = {
   roomExists,
-  getRoomcode,
-  processRoomCode,
   isSockpuppet,
-  initializeSocketData,
-  initializeRoomData,
   generateRoomName,
   generateDisplayName,
-  refreshPublicRooms,
+  getRoomSockets,
+  getPlayerSockets,
   createRoom,
   joinRoom,
-  exitRoom
+  exitRoom,
+  postChatMessage
 };
 
 function roomExists(roomCode) {
   return !!io.sockets.adapter.rooms[roomCode];
 }
 
-function getRoomcode() {
-  for (var code in socket.rooms) {
-    if (code != socket.id) return code;
-  }
-}
-
 function processRoomCode(gameType, roomCode) {
-  const store = require('./store.js')[gameType];
+  const store = require('./store')[gameType];
   if (gameType === gameTypes.SWF) {
     roomCode.toLowerCase();
     roomCode = roomCode.replace(/ /g, '-');
@@ -79,7 +71,8 @@ function initializeRoomData(gameType, options, room) {
   var variables = {
     gameType: gameType,
     socketIds: [],
-    roomState: 0
+    roomState: 0,
+    isPublic: options.isPublic
   };
   if (gameType === gameTypes.SWF) {
     variables.question = '';
@@ -94,7 +87,7 @@ function initializeRoomData(gameType, options, room) {
 }
 
 function generateRoomName(gameType, options) {
-  const store = require('./store.js').store[gameType];
+  const store = require('./store')[gameType];
   if (gameType === gameTypes.SWF) {
     var name = '';
     var noun = store.nouns[Math.floor(Math.random() * store.nouns.length)];
@@ -113,8 +106,8 @@ function generateRoomName(gameType, options) {
   }
 }
 
-function generateDisplayName(gameType) {
-  const store = require('./store.js')[gameType];
+function generateDisplayName(gameType, options) {
+  const store = require('./store')[gameType];
   if (gameType === gameTypes.SWF) {
     var name = store.lastNames[Math.floor(Math.random() * store.lastNames.length)];
     if (Math.floor(Math.random() * 5) === 3) {
@@ -122,7 +115,7 @@ function generateDisplayName(gameType) {
     } else {
       name = store.informalTitles[Math.floor(Math.random() * store.informalTitles.length)] + ' ' + name;
     }
-    return {name: name};  
+    return { name };  
   }
 }
 
@@ -131,7 +124,7 @@ function refreshPublicRooms(gameType) {
   var publicRooms = {};
   //add sockpuppet check
   for (var r in io.sockets.adapter.rooms) {
-    if (r._variables.isPublic && r._variables.gameType === gameType) {
+    if (r._variables && r._variables.isPublic && r._variables.gameType === gameType) {
       publicRooms[r] = r._variables.socketIds.length;
       inRoomIds.concat(r._variables.socketIds);
     }
@@ -147,8 +140,9 @@ function refreshPublicRooms(gameType) {
 
 function getRoomSockets(roomCode) {
   var room = io.sockets.adapter.rooms[roomCode];
-  var roomSockets = [];
   var socketIds = room._variables.socketIds;
+  var sockets = io.sockets.sockets;
+  var roomSockets = [];
   for (var i = 0; i < socketIds.length; i++) {
     var id = socketIds[i];
     roomSockets.push(sockets[id]);
@@ -159,10 +153,9 @@ function getRoomSockets(roomCode) {
 function getPlayerSockets(roomCode) {
   var room = io.sockets.adapter.rooms[roomCode];
   var socketIds = room._variables.socketIds;
-  var playerSockets = [];
   var roomIPs = [];
   var sockets = io.sockets.sockets;
-
+  var playerSockets = [];
   for (var i = 0; i < socketIds.length; i++) {
     var id = socketIds[i];
     if (roomIPs.indexOf(sockets[id].handshake.address) === -1) {
@@ -176,9 +169,7 @@ function getPlayerSockets(roomCode) {
 function createRoom(gameType, options, socket) {
   var roomsNumber = 0;
   for (var r in io.sockets.adapter.rooms) {
-    if (r._variables) {
-      if (r._variables.gameType === gameType) roomsNumber++;
-    }
+    if (r._variables && r._variables.gameType === gameType) roomsNumber++;
   }
   if (roomsNumber >= gameOptions[gameType].maxRooms) {
     socket.emit('warning', 'No new rooms can be created at this time.');
@@ -192,19 +183,19 @@ function createRoom(gameType, options, socket) {
   }
   options.name = name;
   var roomCode = name.name;
-  initializeSocketData(gameType, socket);
   socket.join(roomCode);
   var room = io.sockets.adapter.rooms[roomCode];
   initializeRoomData(gameType, options, room);
+  socket.emit('createdRoom', roomCode);
   joinRoom(gameType, roomCode, socket);
 }
 
 function joinRoom(gameType, roomCode, socket) {
   var warningMessage = '';
-  if (!roomCode) warningMessage = 'Please enter a name.';
+  if (!roomCode) warningMessage = 'Please enter a room code.';
 
   roomCode = processRoomCode(gameType, roomCode);
-  if (!roomExists(roomCode)) warningMessage = 'No place found with that name.';
+  if (!roomExists(roomCode)) warningMessage = 'No room found with that code.';
 
   if (warningMessage) {
     socket.emit('warning', warningMessage);
@@ -213,25 +204,39 @@ function joinRoom(gameType, roomCode, socket) {
 
   var room = io.sockets.adapter.rooms[roomCode];
   room._variables.socketIds.push(socket.id);
+
   initializeSocketData(gameType, socket);
   if (!gameOptions[gameType].allowSockPuppets) inheritSocketData(socket, roomCode);
+  socket._variables.roomCode = roomCode;
+  socket._variables.displayName = generateDisplayName(gameType).name;
+
   socket.join(roomCode, () => {
-    var handleJoin = require('./games/' + gameType).handleJoin;
-    if (handleJoin) handleJoin(roomCode);
+    require('./games/' + gameType).startGame(socket, io);
+    require('./games/' + gameType).handleJoin(roomCode);
     if (room._variables.isPublic) refreshPublicRooms(gameType);
+    socket.emit('joinedRoom', roomCode);
   });
 }
 
-function exitRoom(gameType, roomCode, socket) {
+function exitRoom(socket) {
+  var gameType = socket._variables.gameType;
+  var roomCode = socket._variables.roomCode;
+  socket._removeListeners();
   initializeSocketData(gameType, socket);
-  var roomCode = getRoomcode();
-  if (!roomCode) return;
-  if (!roomExists(roomCode)) return;
+
+  if (!roomCode || !roomExists(roomCode)) return;
   var room = io.sockets.adapter.rooms[roomCode];
 
   var index = room._variables.socketIds.indexOf(socket.id);
   room._variables.socketIds.splice(index, 1);
-  var handleLeave = require('./games/' + gameType).handleLeave;
-  handleLeave(roomCode);
+  socket.leave(roomCode);
+  require('./games/' + gameType).handleExit(socket);
   if (room._variables.isPublic) refreshPublicRooms(gameType);
+  socket.emit('exitedRoom');
+}
+
+function postChatMessage(msg, socket) {
+  var gameType = socket._variables.gameType;
+  require('./games/' + gameType).handleChat(msg, socket);
+  socket.emit('chatMessagePosted');
 }

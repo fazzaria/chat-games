@@ -11,6 +11,7 @@ const SWF_FORMAL_TITLES = ['Lady', 'Lord', 'Baron', 'Professor', 'Doctor', 'Coun
 const SWF_INFORMAL_TITLES = ['Mr.', 'Ms.'];
 
 var store = {};
+
 store[gameTypes.SWF] = {
   adjectives: SWF_ADJECTIVES,
   nouns: SWF_NOUNS,
@@ -19,4 +20,4 @@ store[gameTypes.SWF] = {
   informalTitles: SWF_INFORMAL_TITLES
 };
 
-module.exports = { store };
+module.exports = store;
