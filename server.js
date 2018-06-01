@@ -12,12 +12,10 @@ app.use(express.static(path.join(__dirname, 'build')));
 
 const serve = http.createServer(app);
 const io = socketServer(serve);
-module.exports.io = io;
 
 var connectedIPs = {};
-var connectedCookies = {};
 
-const gameTypes = require('../config.js').gameTypes;
+const gameTypes = require('./app/config.js').gameTypes;
 
 io.on('connection', function (socket) {
 
@@ -28,20 +26,20 @@ io.on('connection', function (socket) {
   socket.on('disconnect', function() {
     delete connectedIPs[socket.id];
     if (socket._variables.gameType) {
-      var handleLeave = require('./games/' + gameType).handleLeave;
+      var handleLeave = require('./games/' + socket._variables.gameType).handleLeave;
       if (handleLeave) handleLeave();
     };
   });
 
-  socket.on('createRoom', (gameType, options, success) => {
+  socket.on('createRoom', function(gameType, options, success) {
     var createRoom = require('./app/common.js').createRoom;
-    if (createRoom) createRoom(gameType, options);
+    if (createRoom) createRoom(gameType, options, socket);
     success();
   });
 
-  socket.on('joinRoom', function(roomCode, success) {
+  socket.on('joinRoom', function(gameType, roomCode, success) {
     var joinRoom = require('./app/common.js').joinRoom;
-    if (joinRoom) joinRoom(roomCode, success);
+    if (joinRoom) joinRoom(gameType, roomCode, socket);
     if (!gameOptions[gameType].allowSockpuppets) {
       var room = io.sockets.adapter.rooms[roomCode];
       var sockets = io.sockets.sockets;
@@ -51,11 +49,17 @@ io.on('connection', function (socket) {
         }
       }  
     }
+    var handleJoin = require('./games/' + gameType).handleJoin;
+    if (handleJoin) handleJoin(roomCode);
+    success();
   });
 
   socket.on('exitRoom', function(roomCode, success) {
     var exitRoom = require('./app/common.js').exitRoom;
-    if (exitRoom) exitRoom(roomCode, success);
+    if (exitRoom) exitRoom(roomCode, socket);
+    var handleLeave = require('./games/' + gameType).handleLeave;
+    if (handleLeave) handleJoin(handleLeave);
+    success();
   });
 
   socket.on('postChatMessage', (msg, success) => {
@@ -69,10 +73,12 @@ io.on('connection', function (socket) {
   });
 
   for (var type in gameTypes) {
-    var onFunctions = require('./games/' + type).onFunctions;
-    if (onFunctions) onFunctions(roomCode, success);
+    var onFunctions = require('./app/games/' + type).main;
+    if (onFunctions) onFunctions(io);
   }
 });
+
+module.exports = { io };
 
 serve.listen(process.env.PORT || 8080, () => console.log("Server running on port 8080."));
 

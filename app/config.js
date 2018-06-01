@@ -6,9 +6,7 @@ var gameTypes = {
 var gameOptions = {};
 
 gameOptions[gameTypes.SWF] = {
-	acceptWord: 'GOODBYE'
-	allowCustomDisplayNames: false,
-	allowCustomRoomNames: false,
+	acceptWord: 'GOODBYE',
 	allowSockPuppets: true,
 	getLunarPhase: false,
 	maxChatMsgLength: 300,
@@ -23,8 +21,6 @@ gameOptions[gameTypes.SWF] = {
 };
 
 gameOptions[gameTypes.OWS] = {
-	allowCustomDisplayNames: true,
-	allowCustomRoomNames: false,
 	allowSockPuppets: true,
 	maxChatMsgLength: 300,
 	maxRooms: 4500,

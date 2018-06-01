@@ -1,89 +1,277 @@
 var http = require('http');
-const settings = require('./app/config/js').configSettings;
+const io = require('../../server').io;
 const gameType = require('../config.js').gameTypes.SWF;
 const gameOptions = require('../config.js').gameOptions[gameType];
 
-const gameOptions = require('../config.js').gameOptions[gameType];
-const gameOptions = require('../config.js').gameOptions[gameType];
-const gameOptions = require('../config.js').gameOptions[gameType];
+const getPlayerSockets = require('../common.js').getPlayerSockets;
+const getRoomSockets = require('../common.js').getRoomSockets;
+const isSockpuppet = require('../common.js').isSockpuppet;
 
-if (gameOptions.getLunarPhase) getLunarPhase();
+module.exports.main = function(io) {
+  io.sockets.on('connection', function(socket) {
+    if (gameOptions.getLunarPhase) getLunarPhase();
 
-function getLunarPhase() {
-  var dt = new Date();
-  var dtString = dt.toLocaleDateString('en-US');
-  var url = `http://api.usno.navy.mil/moon/phase?date=${dtString}&nump=1&ID=fazzaria_ouija_app`;
-  http.get(url, function(res) {
-    res.setEncoding('utf8');
-    res.on('data', function (chunk) {
-      if (chunk) {
-        var chunkJSON = JSON.parse(chunk);
-        if (chunk.day === dt.getDay() && chunk.month === dt.getMonth() && chunk.year === dt.getFullYear()) {
-          var phase = chunkJSON.phasedata[0].phase;
-          var returnPhase = '';
-          if (phase === 'Last Quarter' || phase === 'First Quarter') {
-            returnPhase = 'half';
-          } else if (phase === 'New Moon') {
-            returnPhase = 'new'
-          } else if (phase === 'Full Moon') {
-            returnPhase = 'full';
+    function getLunarPhase() {
+      var dt = new Date();
+      var dtString = dt.toLocaleDateString('en-US');
+      var url = `http://api.usno.navy.mil/moon/phase?date=${dtString}&nump=1&ID=fazzaria_ouija_app`;
+      http.get(url, function(res) {
+        res.setEncoding('utf8');
+        res.on('data', function (chunk) {
+          if (chunk) {
+            var chunkJSON = JSON.parse(chunk);
+            if (chunk.day === dt.getDay() && chunk.month === dt.getMonth() && chunk.year === dt.getFullYear()) {
+              var phase = chunkJSON.phasedata[0].phase;
+              var returnPhase = '';
+              if (phase === 'Last Quarter' || phase === 'First Quarter') {
+                returnPhase = 'half';
+              } else if (phase === 'New Moon') {
+                returnPhase = 'new'
+              } else if (phase === 'Full Moon') {
+                returnPhase = 'full';
+              }
+              socket.emit('lunarPhase', returnPhase);
+            }
           }
-          socket.emit('lunarPhase', returnPhase);
-        }
-      }
-    });
-  }).end();
-}
-
-function refreshData(roomCode) {
-  if (!roomExists(roomCode)) return;
-
-  var room = io.sockets.adapter.rooms[roomCode];
-  var sockets = io.sockets.sockets;
-  var playerIPs = [];
-  var playerSockets = [];
-  var allSockets = [];
-
-  for (var id in sockets) {
-    if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-      if (playerIPs.indexOf(connectedIPs[id]) === -1 || allowSockPuppets) {
-        playerSockets.push(sockets[id]);
-        playerIPs.push(connectedIPs[id]);
-      }
-      allSockets.push(sockets[id]);
+        });
+      }).end();
     }
-  }
 
-  var state = { 
-    roomCode: roomCode,
-    question: room._question,
-    answer: room._answer,
-    roomState: room._roomState,
-    votes: room._votes,
-    preposition: room._preposition,
-    tiebreakCandidates: room._tiebreakCandidates
-  };
+    function refreshData(roomCode) {
+      if (!roomExists(roomCode)) return;
 
-  for (var i = 0; i < allSockets.length; i++) {
-    var players = [];
-    currentSocket = allSockets[i];
+      var room = io.sockets.adapter.rooms[roomCode];
+      var sockets = io.sockets.sockets;
+      var playerIPs = [];
+      var roomSockets = getRoomSockets();
+      var playerSockets = gameOptions.allowSockPuppets ? roomSockets : getPlayerSockets();
 
-    for (var j = 0; j < playerSockets.length; j++) {
-      var currentPlayerSocket = playerSockets[j];
-      var isSelf = currentSocket.id === currentPlayerSocket.id;
-      if (!allowSockPuppets) isSelf = isSockpuppet(currentSocket, currentPlayerSocket);
-      players.push({
-        ready: currentPlayerSocket._ready,
-        voted: !!currentPlayerSocket._vote,
-        self: isSelf,
-        myVote: isSelf ? currentPlayerSocket._vote : null,
-        isAsker: currentPlayerSocket._isAsker
+      var state = {
+        roomCode: roomCode,
+        question: room._variables.question,
+        answer: room._variables.answer,
+        roomState: room._variables.roomState,
+        votes: room._variables.votes,
+        preposition: room._variables.preposition,
+        tiebreakCandidates: room._variables.tiebreakCandidates
+      };
+
+      for (var i = 0; i < roomSockets.length; i++) {
+        var players = [];
+        currentRoomSocket = roomSockets[i];
+
+        for (var j = 0; j < playerSockets.length; j++) {
+          var currentPlayerSocket = playerSockets[j];
+          var isSelf = currentRoomSocket.id === currentPlayerSocket.id;
+          if (!gameOptions.allowSockPuppets) isSelf = isSockpuppet(currentRoomSocket, currentPlayerSocket);
+          players.push({
+            ready: currentPlayerSocket._variables.ready,
+            voted: !!currentPlayerSocket._variables.vote,
+            self: isSelf,
+            myVote: isSelf ? currentPlayerSocket._variables.vote : null,
+            isAsker: currentPlayerSocket._variables.isAsker
+          });
+        }
+
+        state.players = players;
+        currentRoomSocket.emit('roomData', state);
+      }
+    }
+
+    function selectAsker(roomCode) {
+      var sockets = io.sockets.sockets;
+      var playerSockets = gameOptions.allowSockPuppets ? getRoomSockets() : getPlayerSockets();
+      var askerSelected = false;
+
+      playerSockets[Math.floor(Math.random() * playerSockets.length)]._variables.isAsker = true;
+      refreshData(roomCode);
+      io.in(roomCode).emit('askerSelected');
+    }
+
+    function resetRoom(roomCode) {
+      var roomSockets = getRoomSockets();
+      for (var i = 0; i < roomSockets.length; i++) {
+        roomSockets[i]._variables.vote = '';
+        roomSockets[i]._variables.isAsker = false;
+        roomSockets[i]._variables.ready = false;
+      }
+      room._variables.roomState = 0;
+      room._variables.question = '';
+      room._variables.answer = '';
+      room._variables.votes = [];
+      room._variables.tiebreakCandidates = [];
+    }
+
+    function validateOnFunction() {
+      var roomCode = getRoomcode();
+      if (!roomCode) return false;
+      if (!roomExists(roomCode)) return false;
+      var room = io.sockets.adapter.rooms[roomCode];
+      if (room._variables.players.indexOf(socket.id) === -1) return false;
+      return true;
+    }
+
+    function onFunctions() {
+      socket.on(gameType + '_toggleReady', () => {
+        if (!validateOnFunction()) return;
+        var room = io.sockets.adapter.rooms[roomCode];
+        if (room._variables.roomState !== 0) return;
+
+        var readies = 0;
+        var sockets = io.sockets.sockets;
+        var roomSockets = getRoomSockets();
+        var playerSockets = gameOptions.allowSockPuppets ? getRoomSockets() : getPlayerSockets();
+
+        var newReadyState = !socket._variables.ready;
+        socket._variables.ready = newReadyState;
+
+        for (var i = 0; i < roomSockets.length; i++) {
+          if (!gameOptions.allowSockPuppets && isSockpuppet(roomSockets[i], socket)) {
+            roomSockets[i]._variables.ready = newReadyState;
+          }
+        }
+
+        for (var j = 0; j < playerSockets.length; j++) {
+          if (playerSockets[j]._variables.ready) readies++;
+        }
+
+        if (playerSockets.length >= gameOptions.minPlayers && playerSockets.length === readies) {
+          selectAsker(roomCode);
+          room._variables.votes = [];
+          room._variables.answer = '';
+          room._variables.question = '';
+          room._variables.roomState = 1;
+          for (var k = 0; k < roomSockets.length; k++) {
+            roomSockets[k]._ready = false;
+          }
+        }
+        refreshData(roomCode);
+      });
+
+      socket.on(gameType + '_submitVote', (vote) => {
+        if (!validateOnFunction()) return;
+        var room = io.sockets.adapter.rooms[roomCode];
+        if (room._variables.roomState < 2) return;
+
+        var warnMessage = '';
+
+        if (!vote) warnMessage = 'Please enter a character.';
+        if (!!socket._variables.vote) warnMessage ='You have already voted.';
+        if (vote.length > 1 && vote !== gameOptions.acceptWord) vote = vote[0];
+        vote = vote.toUpperCase();
+        if (room._variables.roomState === 3 && room._variables.tiebreakCandidates.indexOf(vote) === -1) warnMessage = 'Vote must be for one of the candidates:' + tiebreakCandidates.join(', ') + '.';
+
+        if (warnMessage) {
+          socket.emit('warning', warnMessage);
+          return;
+        }
+
+        var roomSockets = getRoomSockets();
+        var playerSockets = gameOptions.allowSockPuppets ? getRoomSockets() : getPlayerSockets();
+        var voterSockets = [];
+
+        socket._variables.vote = vote;
+
+        voterSockets.push(socket);
+
+        if (!gameOptions.allowSockPuppets) {
+          for (var i = 0; i < roomSockets.length; i++) {
+            if (isSockpuppet(roomSockets[i], socket)) {
+              roomSockets[i]._variables.vote = vote;
+              voterSockets.push(roomSockets[i]);
+            }
+          }
+        }
+
+        var votes = [];
+        for (var j = 0; j < playerSockets.length; j++) {
+          votes.push(playerSockets[j]._variables.vote);
+        }
+
+        var result = [];
+
+        socket._variables.vote = vote;
+
+        var allIn = gameOptions.allowSockPuppets ? votes.length === roomSockets.length : votes.length === playerSockets.length;
+
+        if (allIn) {
+          for (var j = 0; j < roomSockets.length; j++) {
+            roomSockets[j]._variables.vote = '';
+          }
+
+          //shuffle votes
+          var counter = votes.length;
+          while (counter > 0) {
+            var index = Math.floor(Math.random() * counter);
+            counter--;
+            var temp = votes[counter];
+            votes[counter] = votes[index];
+            votes[index] = temp;
+          }
+
+          //select winner
+          distribution = {};
+          max = 0;
+          votes.forEach(function (a) {
+            distribution[a] = (distribution[a] || 0) + 1;
+            if (distribution[a] > max) {
+              max = distribution[a];
+              result = [a];
+              return;
+            }
+            if (distribution[a] === max) {
+              result.push(a);
+            }
+          });
+
+          room._variables.votes = votes;
+          if (result.length > 1) {
+            room._variables.tiebreakCandidates = result;
+            room._variables.roomState = 3;
+          } else if (result.length === 1 && result[0] !== gameOptions.acceptWord) {
+            room._variables.answer += result[0];
+            room._variables.roomState = 2;
+          } else if (result.length === 1 && result[0] === gameOptions.acceptWord) {
+            room._variables.roomState = 0;
+          }
+        }
+
+        refreshData(roomCode);
+        for (var k = 0; k < voterSockets.length; k++) {
+          voterSockets[k].emit('voteAccepted', vote);
+        }
+
+        if (room._variables.roomState === 0) io.in(roomCode).emit('answerDecided');
+        if (room._variables.roomState === 2 && result[0]) io.in(roomCode).emit('letterDecided', result[0]);
+        if (room._variables.roomState === 3 && result[0]) io.in(roomCode).emit('drawReached');
+      });
+
+      socket.on(gameType + '_submitQuestion', (question) => {
+        if (!validateOnFunction()) return;
+
+        var room = io.sockets.adapter.rooms[roomCode];
+        var warnMessage = '';
+        if (!question) warnMessage = 'Please enter a question.';
+        if (!socket._variables.isAsker) warnMessage = 'You haven\'t been selected to ask the question.';
+        if (room._variables.roomState !== 1) warnMessage = 'It isn\'t the time to ask the question.';
+
+        if (warnMessage) {
+          socket.emit('warning', warnMessage);
+        }
+
+        var roomSockets = getRoomSockets();
+
+        for (var i = 0; i < roomSockets.length; i++) {
+          roomSockets[i]._variables.isAsker = false;
+        }
+
+        room._variables.question = question;
+        room._variables.roomState = 2;
+        refreshData(roomCode);
+        io.in(roomCode).emit('questionAccepted', question);
       });
     }
-
-    state.players = players;
-    currentSocket.emit('roomData', state);
-  }
+  });
 }
 
 function handleJoin(roomCode) {
@@ -91,278 +279,36 @@ function handleJoin(roomCode) {
 }
 
 function handleLeave(roomCode) {
-  initializeSocketData();
   socket.leave(roomCode);
+  if (!roomExists(roomCode)) return;
 
   var room = io.sockets.adapter.rooms[roomCode];
   var numInRoom = 0;
-  var sockets = io.sockets.sockets;
-  var IPsCounted = [];
   var askerPresent = false;
+  var playerSockets = gameOptions.allowSockPuppets ? getRoomSockets() : getPlayerSockets();
 
-  for (var id in sockets) {
-    if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-      var currentSocketIP = connectedIPs[id];
-      if (IPsCounted.indexOf(currentSocketIP) === -1 || allowSockPuppets) {
-        numInRoom++;
-        IPsCounted.push(currentSocketIP);
-      }
-      if (sockets[id]._isAsker) askerPresent = true;
-    }
+  for (var i = 0; i < playerSockets.length; i++) {
+    if (playerSockets[i]._variables.isAsker) askerPresent = true;
   }
 
-  if (numInRoom === 0) return;
-  if (numInRoom < minPlayers) {
-    io.in(roomCode).emit('warning', 'At least ' + minPlayers + ' participants must be present to proceed.');
+  if (playerSockets.length === 0) return;
+  if (playerSockets.length < gameOptions.minPlayers) {
+    io.in(roomCode).emit('warning', 'At least ' + gameOptions.minPlayers + ' participants must be present to proceed.');
     resetRoom(roomCode);
   } else {
-    if (!askerPresent && room._roomState === 1) selectAsker(roomCode);
+    if (!askerPresent && room._variables.roomState === 1) selectAsker(roomCode);
   }
   refreshData(roomCode);
 }
 
 function handleChat(msg, roomCode) {
-  if (!msg) return false;
+  if (!validateOnFunction()) return;
   var room = io.sockets.adapter.rooms[roomCode];
-  if (room._roomState > 0) return false;
+  if (room._variables.roomState > 0) return false;
 
   if (msg.length > gameOptions.maxChatMsgLength) msg = msg.slice(0, maxChatMsgLength);
-  msg = socket._displayName + ' said: ' + msg;
+  msg = socket._variables.displayName + ': ' + msg;
   io.in(roomCode).emit('newChatMessage', msg);
-}
-
-function selectAsker(roomCode) {
-  var sockets = io.sockets.sockets;
-  var roomSockets = [];
-  var roomIPs = [];
-  var askerSelected = false;
-
-  for (var id in sockets) {
-    if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-      if (roomIPs.indexOf(connectedIPs[id]) === -1) {
-        roomIPs.push(connectedIPs[id]);
-      }
-      roomSockets.push(sockets[id]);
-    }
-  }
-
-  if (gameOptions.allowSockPuppets) {
-    roomSockets[Math.floor(Math.random() * roomSockets.length)]._isAsker = true;
-    askerSelected = true;
-  } else {
-    var askerIP = roomIPs[Math.floor(Math.random() * roomIPs.length)];
-    for (var i = 0; i < roomSockets.length; i++) {
-      if (connectedIPs[roomSockets[i].id] === askerIP) {
-        roomSockets[i]._isAsker = true;
-        askerSelected = true;
-      }
-    }
-  }
-  if (askerSelected) {
-    refreshData(roomCode);
-    io.in(roomCode).emit('askerSelected');
-  } else if (!askerSelected && roomExists(roomCode)) {
-    selectAsker(roomCode);
-  }
-}
-
-function resetRoom(roomCode) {
-  var room = io.sockets.adapter.rooms[roomCode];
-  var sockets = io.sockets.sockets;
-  for (var id in sockets) {
-    if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-      sockets[id]._vote = '';
-      sockets[id]._isAsker = false;
-      sockets[id]._ready = false;
-    }
-  }
-  room._roomState = 0;
-  room._question = '';
-  room._answer = '';
-  room._votes = [];
-  room._tiebreakCandidates = [];
-}
-
-function onFunctions() {
-  socket.on(gameType + '_toggleReady', () => {
-    var roomCode = getRoomcode();
-    if (!roomCode) return;
-    if (!roomExists(roomCode)) return;
-    var room = io.sockets.adapter.rooms[roomCode];
-    if (room._roomState !== 0) return;
-
-    var readies = 0;
-    var total = 0;
-    var sockets = io.sockets.sockets;
-    var roomSockets = [];
-    var roomIPs = [];
-    var newReadyState = !socket._ready;
-
-    socket._ready = newReadyState;
-
-    for (var id in sockets) {
-      if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-        var currentSocketIP = connectedIPs[id];
-        if (isSockpuppet(sockets[id], socket) && !allowSockPuppets) {
-          sockets[id]._ready = newReadyState;
-        }
-        if (roomIPs.indexOf(currentSocketIP) === -1 || allowSockPuppets) {
-          if (sockets[id]._ready) {
-            readies++;
-          }
-          total++;
-          roomIPs.push(currentSocketIP);
-        }
-        roomSockets.push(sockets[id]);
-      }
-    }
-
-    if (total >= minPlayers && total == readies) {
-      selectAsker(roomCode);
-      room._votes = [];
-      room._answer = '';
-      room._question = '';
-      room._roomState = 1;
-      for (var j = 0; j < roomSockets.length; j++) {
-        roomSockets[j]._ready = false;
-      }
-    }
-    refreshData(roomCode);
-  });
-
-  socket.on(gameType + '_submitVote', (vote) => {
-    var roomCode = getRoomcode();
-    if (!roomCode) return;
-    if (!roomExists(roomCode)) return;
-    var room = io.sockets.adapter.rooms[roomCode];
-    if (room._roomState < 2) return;
-
-    if (!vote) {
-      socket.emit('warning', 'Please enter a character.');
-      return;
-    }
-
-    if (!socket._vote) {
-      if (vote.length > 1 && vote !== acceptWord) vote = vote[0];
-      vote = vote.toUpperCase();
-      if (room._roomState === 3) {
-        var tiebreakCandidates = room._tiebreakCandidates;
-        if (tiebreakCandidates.indexOf(vote) === -1) {
-          socket.emit('warn', 'Vote must be for one of the candidates:' + tiebreakCandidates.join(', ') + '.');
-          return;
-        }
-      }
-
-      var votes = [];
-      var result = [];
-      var sockets = io.sockets.sockets;
-      var roomIPs = [];
-      var roomSockets = [];
-      var voterSockets = [];
-
-      socket._vote = vote;
-
-      for (var id in sockets) {
-        if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-          if (allowSockPuppets) {
-            if (voterSockets.length === 0) voterSockets.push(socket);
-          } else {
-            if (isSockpuppet(sockets[id], socket)) {
-              sockets[id]._vote = vote;
-              voterSockets.push(sockets[id]);
-            }
-          }
-          roomSockets.push(sockets[id]);
-        }
-      }
-
-      for (var i = 0; i < roomSockets.length; i++) {
-        var currentSocketIP = connectedIPs[roomSockets[i].id];
-        if (roomIPs.indexOf(currentSocketIP) === -1 || allowSockPuppets) { 
-          roomIPs.push(currentSocketIP);
-          if (roomSockets[i]._vote) votes.push(roomSockets[i]._vote);
-        }
-      }
-
-      var allIn = false;
-      if (allowSockPuppets) {
-        allIn = votes.length === roomSockets.length;
-      } else {
-        allIn = votes.length === roomIPs.length;
-      }
-
-      if (allIn) {
-        for (var j = 0; j < roomSockets.length; j++) {
-          roomSockets[j]._vote = '';
-        }
-        //shuffle votes
-        var counter = votes.length;
-        while (counter > 0) {
-          var index = Math.floor(Math.random() * counter);
-          counter--;
-          var temp = votes[counter];
-          votes[counter] = votes[index];
-          votes[index] = temp;
-        }
-        //select winner
-        distribution = {};
-        max = 0;
-        votes.forEach(function (a) {
-          distribution[a] = (distribution[a] || 0) + 1;
-          if (distribution[a] > max) {
-            max = distribution[a];
-            result = [a];
-            return;
-          }
-          if (distribution[a] === max) {
-            result.push(a);
-          }
-        });
-        room._votes = votes;
-        if (result.length > 1) {
-          room._tiebreakCandidates = result;
-          room._roomState = 3;
-        } else if (result.length === 1 && result[0] !== acceptWord) {
-          room._answer += result[0];
-          room._roomState = 2;
-        } else if (result.length === 1 && result[0] === acceptWord) {
-          room._roomState = 0;
-        }
-      }
-      refreshData(roomCode);
-      for (var k = 0; k < voterSockets.length; k++) {
-        voterSockets[k].emit('voteAccepted', vote);
-      }
-      if (room._roomState === 0) io.in(roomCode).emit('answerDecided');
-      if (room._roomState === 2 && result[0]) io.in(roomCode).emit('letterDecided', result[0]);
-      if (room._roomState === 3 && result[0]) io.in(roomCode).emit('drawReached');
-    } else refreshData(roomCode);
-  });
-
-  socket.on(gameType + '_submitQuestion', (question) => {
-    var roomCode = getRoomcode();
-    if (!roomCode) return;
-    if (!roomExists(roomCode)) return;
-    var room = io.sockets.adapter.rooms[roomCode];
-    if (room._roomState !== 1) return;
-    if (!socket._isAsker) return;
-
-    if (!question) {
-      socket.emit('warning', 'Please enter a question.');
-      return;
-    }
-
-    var sockets = io.sockets.sockets;
-    for (var id in sockets) {
-      if (sockets[id].rooms[roomCode] && sockets[id]._joinedRoom) {
-        sockets[id]._isAsker = false;
-      }
-    }
-    room._question = question;
-    room._roomState = 2;
-    refreshData(roomCode);
-    io.in(roomCode).emit('questionAccepted', question);
-  });
 }
 
 module.exports = {

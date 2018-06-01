@@ -6,6 +6,8 @@ import Controls from './Controls.jsx';
 
 let socket;
 
+const gameType = 'SWF';
+
 class Main extends Component {
   constructor(props) {
     super(props);
@@ -182,7 +184,7 @@ class Main extends Component {
         showIsPublic: true
       });
     } else {
-      socket.emit('createRoom', isPublic, (code) => {
+      socket.emit('createRoom', gameType, { isPublic }, (code) => {
         this.setState({ 
           isAsker: false,
           roomCode: code,
@@ -198,7 +200,7 @@ class Main extends Component {
       this.setAlert('Please enter a name.', 'warning', true);
       return;
     }
-    socket.emit('joinRoom', roomCode, (code) => {
+    socket.emit('joinRoom', gameType, roomCode, (code) => {
       this.setState({ 
         isAsker: this.isAsker(),
         roomCode: code 
