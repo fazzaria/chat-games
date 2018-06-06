@@ -264,7 +264,7 @@ function startGame(socket) {
     var warnMessage = '';
     if (!question) warnMessage = 'Please enter a question.';
     if (!socket._variables.isAsker) warnMessage = 'You haven\'t been selected to ask the question.';
-    if (room._variables.roomState !== 1) warnMessage = 'It isn\'t the time to ask the question.';
+    if (room._variables.roomState !== 1) warnMessage = 'It isn\'t time to ask the question.';
 
     if (warnMessage) {
       socket.emit('warning', warnMessage);

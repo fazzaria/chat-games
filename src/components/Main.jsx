@@ -45,7 +45,7 @@ class Main extends Component {
     this.changeQuestionInput = this.changeQuestionInput.bind(this);
     this.changeVoteInput = this.changeVoteInput.bind(this);
     this.clearAlert = this.clearAlert.bind(this);
-    this.commitQuestion = this.commitQuestion.bind(this);
+    this.submitQuestion = this.submitQuestion.bind(this);
     this.createRoom = this.createRoom.bind(this);
     this.exitRoom = this.exitRoom.bind(this);
     this.formatRoomName = this.formatRoomName.bind(this);
@@ -112,13 +112,14 @@ class Main extends Component {
           message = 'You have been chosen to pose the question.';
           this.focusInputs();
         } else {
-          message = 'The questioner has been chosen. Silence, please.';
+          message = 'The questioner has been chosen.';
         }
         this.addRoomMessage({ text: message, cssClass: 'dark' });  
       });
     });
 
     socket.on('questionAccepted', (question) => {
+      console.log(question);
       this.setState({
         isAsker: false
       });
@@ -262,7 +263,7 @@ class Main extends Component {
     socket.emit('toggleReady');
   }
 
-  commitQuestion(question) {
+  submitQuestion(question) {
     if (question) {
       socket.emit('submitQuestion', this.state.questionInput);
     } else {
@@ -380,7 +381,7 @@ class Main extends Component {
                     changeVoteInput={this.changeVoteInput}
                     chatInput={this.state.chatInput}
                     chatInputRef={this.chatInputRef}
-                    commitQuestion={this.commitQuestion}
+                    submitQuestion={this.submitQuestion}
                     handleEnterKey={this.handleEnterKey}
                     isAsker={this.state.isAsker}
                     postChatMessage={this.postChatMessage}

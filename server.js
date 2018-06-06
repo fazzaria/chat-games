@@ -13,19 +13,17 @@ app.use(express.static(path.join(__dirname, 'build')));
 const serve = http.createServer(app);
 const io = socketServer(serve);
 
-var connectedIPs = {};
-
 const gameTypes = require('./app/config').gameTypes;
 
 io.on('connection', function (socket) {
 
+  function authorize() {
+    
+  }
 
   require('./app/games/SWF').startGame(socket, io);
 
-  connectedIPs[socket.id] = socket.handshake.address;
-
   socket.on('disconnect', function() {
-    delete connectedIPs[socket.id];
     if (!socket._variables) return;
     if (socket._variables.gameType) {
       var handleLeave = require('./app/games/' + socket._variables.gameType).handleLeave;
@@ -44,7 +42,6 @@ io.on('connection', function (socket) {
   });
 
   socket.on('exitRoom', function() {
-    //https://stackoverflow.com/questions/23092624/socket-io-removing-specific-listener
     if (!socket._variables || !socket._variables.gameType) return;
     //maybe send a force reload
     require('./app/common').exitRoom(socket);

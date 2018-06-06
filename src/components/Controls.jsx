@@ -38,13 +38,13 @@ class Controls extends Component {
             className='form-control form-control-lg' 
             value={this.props.questionInput}
             onChange={this.props.changeQuestionInput}
-            onKeyUp={(e) => {if (e.which === 13) this.props.commitQuestion(this.props.questionInput)}}
+            onKeyUp={(e) => {if (e.which === 13) this.props.submitQuestion(this.props.questionInput)}}
             ref={this.props.questionInputRef} 
             placeholder='Ask the spirits a question.'
             type='text' 
           />
           <div className='input-group-append'>
-            <button className='btn btn-dark btn-lg' onClick={()=>this.props.commitQuestion(this.props.questionInput)}>Ask</button>
+            <button className='btn btn-dark btn-lg' onClick={()=>this.props.submitQuestion(this.props.questionInput)}>Ask</button>
           </div>
         </div>
       );
@@ -63,7 +63,7 @@ class Controls extends Component {
             disabled={voted}
           />
           <div className='input-group-append'>
-            <button className='btn btn-light btn-lg' disabled={voted} onClick={()=>this.props.submitVote(this.props.voteInput)}>Commit</button>
+            <button className='btn btn-light btn-lg' disabled={voted} onClick={()=>this.props.submitVote(this.props.voteInput)}>Submit</button>
             <button className='btn btn-dark btn-lg' disabled={voted} onClick={()=>this.props.submitVote('GOODBYE')}>Goodbye</button>
           </div>
         </div>
