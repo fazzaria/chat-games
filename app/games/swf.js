@@ -90,7 +90,7 @@ function validateFunction(socket) {
   return true;
 }
 
-function startGame(socket) {
+function startSockets(socket) {
   if (gameOptions.getLunarPhase) getLunarPhase();
 
   function getLunarPhase() {
@@ -118,6 +118,18 @@ function startGame(socket) {
       });
     }).end();
   }
+
+  var postChatMessage = function(msg) {
+    if (!validateFunction(socket)) return;
+    var roomCode = socket._variables.roomCode;
+    var room = io.sockets.adapter.rooms[roomCode];
+    if (room._variables.roomState > 0) return false;
+  
+    if (msg.length > gameOptions.maxChatMsgLength) msg = msg.slice(0, gameOptions.maxChatMsgLength);
+    msg = socket._variables.displayName + ': ' + msg;
+    io.in(roomCode).emit('newChatMessage', msg);
+    socket.emit('yourMessagePosted');
+  };
 
   var toggleReady = function() {
     if (!validateFunction(socket)) return;
@@ -254,7 +266,7 @@ function startGame(socket) {
     if (room._variables.roomState === 0) io.in(roomCode).emit('answerDecided');
     if (room._variables.roomState === 2 && result[0]) io.in(roomCode).emit('letterDecided', result[0]);
     if (room._variables.roomState === 3 && result[0]) io.in(roomCode).emit('drawReached');
-  }
+  };
 
   var submitQuestion = function(question) {
     if (!validateFunction(socket)) return;
@@ -280,10 +292,10 @@ function startGame(socket) {
     room._variables.roomState = 2;
     refreshData(roomCode);
     io.in(roomCode).emit('questionAccepted', question);
-  }
+  };
 
   var eventFunctions = {
-    toggleReady, submitVote, submitQuestion
+    postChatMessage, toggleReady, submitVote, submitQuestion
   };
 
   for (var event in eventFunctions) {
@@ -325,20 +337,8 @@ function handleExit(socket) {
   socket.emit('leftRoom');
 }
 
-function handleChat(msg, socket) {
-  if (!validateFunction(socket)) return;
-  var roomCode = socket._variables.roomCode;
-  var room = io.sockets.adapter.rooms[roomCode];
-  if (room._variables.roomState > 0) return false;
-
-  if (msg.length > gameOptions.maxChatMsgLength) msg = msg.slice(0, maxChatMsgLength);
-  msg = socket._variables.displayName + ': ' + msg;
-  io.in(roomCode).emit('newChatMessage', msg);
-}
-
 module.exports = {
-  startGame,
+  startSockets,
   handleJoin,
-  handleChat,
   handleExit
 };

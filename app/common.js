@@ -9,10 +9,10 @@ module.exports = {
   generateDisplayName,
   getRoomSockets,
   getPlayerSockets,
+  gameHome,
   createRoom,
   joinRoom,
-  exitRoom,
-  postChatMessage
+  exitRoom
 };
 
 function roomExists(roomCode) {
@@ -20,7 +20,6 @@ function roomExists(roomCode) {
 }
 
 function processRoomCode(gameType, roomCode) {
-  const store = require('./store')[gameType];
   if (gameType === gameTypes.SWF) {
     roomCode.toLowerCase();
     roomCode = roomCode.replace(/ /g, '-');
@@ -33,9 +32,8 @@ function processRoomCode(gameType, roomCode) {
   }
 }
 
-function isSockpuppet(gameType, socket1, socket2) {
-  if (gameOptions[gameType].allowSockPuppets) return false;
-  return socket1.handshake.address === socket2.handshake.address;
+function isSockpuppet(socket1, socket2) {
+  return socket1.handshake.sessionID === socket2.handshake.sessionID;
 }
 
 function inheritSocketData(socket, roomCode) {
@@ -52,27 +50,29 @@ function inheritSocketData(socket, roomCode) {
 
 function initializeSocketData(gameType, socket) {
   var variables = {
-    gameType: gameType,
-    displayName: ''
+    inGame: gameType,
+    roomCode: ''
   };
   if (gameType === gameTypes.SWF) {
     variables.isAsker = false;
     variables.ready = false;
     variables.vote = '';
+    variables.displayName = generateDisplayName(gameType);
   }
   if (gameType === gameTypes.OWS) {
     variables.done = false;
     variables.ready = false;
+    variables.displayName = '';
   }
   socket._variables = variables;
 }
 
 function initializeRoomData(gameType, options, room) {
   var variables = {
-    gameType: gameType,
+    inGame: gameType,
     socketIds: [],
     roomState: 0,
-    isPublic: options.isPublic
+    isPublic: !!options.isPublic
   };
   if (gameType === gameTypes.SWF) {
     variables.question = '';
@@ -82,6 +82,8 @@ function initializeRoomData(gameType, options, room) {
     variables.preposition = options.name.preposition;
   }
   if (gameType === gameTypes.OWS) {
+    variables.story = [];
+    variables.players = [];
   }
   room._variables = variables;
 }
@@ -122,9 +124,11 @@ function generateDisplayName(gameType, options) {
 function refreshPublicRooms(gameType) {
   var inRoomIds = [];
   var publicRooms = {};
+  var rooms = io.sockets.adapter.rooms;
   //add sockpuppet check
-  for (var r in io.sockets.adapter.rooms) {
-    if (r._variables && r._variables.isPublic && r._variables.gameType === gameType) {
+  for (var r in rooms) {
+    var room = rooms[r];
+    if (room._variables && room._variables.isPublic && room._variables.gameType === gameType) {
       publicRooms[r] = r._variables.socketIds.length;
       inRoomIds.concat(r._variables.socketIds);
     }
@@ -132,8 +136,8 @@ function refreshPublicRooms(gameType) {
 
   var sockets = io.sockets.sockets;
   for (var id in sockets) {
-    if (sockets[id]._gameType === gameType && inRoomIds.indexOf(id) === -1) {
-      sockets[id].emit('roomData', {publicRooms});
+    if (sockets[id]._variables.inGame === gameType && inRoomIds.indexOf(id) === -1) {
+      sockets[id].emit('publicRooms', {publicRooms});
     }
   }
 }
@@ -153,23 +157,31 @@ function getRoomSockets(roomCode) {
 function getPlayerSockets(roomCode) {
   var room = io.sockets.adapter.rooms[roomCode];
   var socketIds = room._variables.socketIds;
-  var roomIPs = [];
   var sockets = io.sockets.sockets;
   var playerSockets = [];
   for (var i = 0; i < socketIds.length; i++) {
-    var id = socketIds[i];
-    if (roomIPs.indexOf(sockets[id].handshake.address) === -1) {
-      playerSockets.push(sockets[id]);
-      roomIPs.push(sockets[id].handshake.address);
+    var sockpuppetExists = false;
+    for (var j = 0; j < socketIds.length; j++) {
+      if (isSockpuppet(sockets[socketIds[i]], sockets[socketIds[j]])) sockpuppetExists = true;
     }
+    if (!sockpuppetExists) playerSockets.push(sockets[id]);
   }
   return playerSockets;
 }
 
+function gameHome(gameType, socket) {
+  if (typeof(gameType) !== String && !gameTypes[gameType]) return;
+  refreshPublicRooms(gameType);
+  var handleGameHome = require('./games/' + gameType).handleGameHome;
+  if (handleGameHome) handleGameHome(socket);
+}
+
 function createRoom(gameType, options, socket) {
+  if (typeof(gameType) !== String && !gameTypes[gameType]) return;
   var roomsNumber = 0;
-  for (var r in io.sockets.adapter.rooms) {
-    if (r._variables && r._variables.gameType === gameType) roomsNumber++;
+  var rooms = io.sockets.adapter.rooms;
+  for (var r in rooms) {
+    if (rooms[r]._variables && rooms[r]._variables.gameType === gameType) roomsNumber++;
   }
   if (roomsNumber >= gameOptions[gameType].maxRooms) {
     socket.emit('warning', 'No new rooms can be created at this time.');
@@ -191,6 +203,7 @@ function createRoom(gameType, options, socket) {
 }
 
 function joinRoom(gameType, roomCode, socket) {
+  if (typeof(gameType) !== String && !gameTypes[gameType]) return;
   var warningMessage = '';
   if (!roomCode) warningMessage = 'Please enter a room code.';
 
@@ -208,10 +221,9 @@ function joinRoom(gameType, roomCode, socket) {
   initializeSocketData(gameType, socket);
   if (!gameOptions[gameType].allowSockPuppets) inheritSocketData(socket, roomCode);
   socket._variables.roomCode = roomCode;
-  socket._variables.displayName = generateDisplayName(gameType).name;
 
   socket.join(roomCode, () => {
-    require('./games/' + gameType).startGame(socket, io);
+    require('./games/' + gameType).startSockets(socket, io);
     require('./games/' + gameType).handleJoin(roomCode);
     if (room._variables.isPublic) refreshPublicRooms(gameType);
     socket.emit('joinedRoom', roomCode);
@@ -219,7 +231,7 @@ function joinRoom(gameType, roomCode, socket) {
 }
 
 function exitRoom(socket) {
-  var gameType = socket._variables.gameType;
+  var gameType = socket._variables.inGame;
   var roomCode = socket._variables.roomCode;
   socket._removeListeners();
   initializeSocketData(gameType, socket);
@@ -233,10 +245,4 @@ function exitRoom(socket) {
   require('./games/' + gameType).handleExit(socket);
   if (room._variables.isPublic) refreshPublicRooms(gameType);
   socket.emit('exitedRoom');
-}
-
-function postChatMessage(msg, socket) {
-  var gameType = socket._variables.gameType;
-  require('./games/' + gameType).handleChat(msg, socket);
-  socket.emit('chatMessagePosted');
 }

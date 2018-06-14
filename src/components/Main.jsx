@@ -151,7 +151,7 @@ class Main extends Component {
       this.addRoomMessage({ text: 'Waiting for participants...', cssClass: 'dark' });
     });
 
-    socket.on('chatMessagePosted', () => {
+    socket.on('yourMessagePosted', () => {
       this.setState({
         chatInput: ''
       });
