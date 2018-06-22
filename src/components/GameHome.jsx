@@ -1,12 +1,6 @@
 import React, { Component } from 'react';
-import { Redirect, withRouter } from "react-router-dom";
-import io from 'socket.io-client';
-import RoomMessages from './RoomMessages.jsx';
-import Controls from './Controls.jsx';
+import { Link, Redirect, withRouter } from "react-router-dom";
 import games from '../data/games';
-import NotFound from './404';
-
-let socket;
 
 class GameHome extends Component {
   constructor(props) {
@@ -14,28 +8,31 @@ class GameHome extends Component {
     this.state = {
       feedbackMsg: '',
       feedbackType: '',
+      publicRooms: {},
       showCreateOptions: false,
-      redirect: '',
+      newURL: ''
     };
-    this.redirect = this.redirect.bind(this);
     this.toggleCreateOptions = this.toggleCreateOptions.bind(this);
+    this.redirect = this.redirect.bind(this);
     this.codeInputRef = React.createRef();
   }
   componentDidMount() {
-    //socket = io.connect(window.location.origin);
-    socket = io.connect('localhost:8080');
-    socket.on('publicRooms', (data) => this.setState(data));
-    socket.on('joinedGame', (roomCode) => {
-      this.redirect(`${this.props.match.url}/${roomCode}`);
-    });
-  }
-
-  componentWillUnmount() {
-    socket.disconnect();
+    console.log(this.props)
+    var gameType = this.props.match.params.game;
+    if (games[gameType]) {
+      //this.props.setAlert('test', 'warning', true);
+      this.props.socket.emit('gameHome', gameType);
+      this.props.socket.on('publicRooms', (publicRooms) => this.setState(publicRooms));
+      this.props.socket.on('joinedGame', (roomCode) => {
+        //this.redirect(`${this.props.match.url}/${roomCode}`);
+      });  
+    }
   }
 
   createRoom(isPublic) {
-    socket.emit('createRoom', this.props.gameType, { isPublic });
+    var gameType = this.props.match.params.game;
+    this.props.clearAlert();
+    this.props.socket.emit('createRoom', gameType, { isPublic });
   }
 
   toggleCreateOptions() {
@@ -45,39 +42,52 @@ class GameHome extends Component {
   }
 
   joinRoom(roomCode) {
+    var gameType = this.props.match.params.game;
+    this.props.clearAlert();
     if (!roomCode) {
-      this.setAlert('Please enter a name.', 'warning', true);
+      this.setState({
+        feedbackMsg: 'Please enter a name.',
+        feedbackType: 'warning'
+      });
       return;
     }
-    socket.emit('joinRoom', this.props.gameType, roomCode);
+    this.props.socket.emit('joinRoom', gameType, roomCode);
   }
 
   redirect(url) {
     this.setState({
-      redirect: url
+      newURL: url
     });
   }
+
   render() {
-    var gameData = games[this.props.gameType];
+    var gameType = this.props.match.params.game;
+    const gameData = games[gameType];
+    if (!gameData) {
+      return (
+        <div className='container'>
+          <div className='row'>
+            <div className='col'>
+              <h1>404</h1>
+              <hr />
+            </div>
+          </div>
+          <div className='row'>
+            <div className='col'>
+              <p>No such game found.</p>
+              <Link to='/'><strong>Home</strong></Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div>
         <div className='container'>
-          {this.state.feedbackMsg ?
-            <div className='row'>
-              <div className='col'>
-                <div className={'alert alert-' + this.state.feedbackType + ' alert-dismissible fade show'} role='alert'>
-                  <strong>{this.state.feedbackMsg}</strong>
-                  <button type='button' className='close' onClick={this.clearAlert} aria-label='Close'>
-                    <span aria-hidden='true'>&times;</span>
-                  </button>
-                </div> 
-              </div>
-            </div>
-          : null}
           <div className='row mb-4'>
             <div className='col'>
               <button onClick={()=>this.redirect('/')} className='btn float-right'>Home</button>
-              <button onClick={()=>this.redirect(`${this.props.match.url}/test`)} className='btn float-right'>test</button>
+              <button onClick={()=>this.redirect('/test')} className='btn float-right'>test</button>
               <h3>{gameData.name}</h3>
               <h3 className='small'>{gameData.subtitle}</h3>
               <hr />
@@ -92,7 +102,7 @@ class GameHome extends Component {
                   />
                   <div className='input-group-append'>
                     <button className='btn btn-light btn-lg' onClick={()=>this.joinRoom(this.codeInputRef.current.value)}>Join</button>
-                    <button className='btn btn-dark btn-primary btn-lg' onClick={this.toggleCreateOptions}>Start New</button>
+                    <button className='btn btn-primary btn-primary btn-lg' onClick={this.toggleCreateOptions}>Start New</button>
                   </div>  
                 </div>
               : 
@@ -101,7 +111,7 @@ class GameHome extends Component {
                     <button onClick={()=> this.createRoom(true)} className="btn btn-light btn-lg btn-block">Public</button>
                   </li>
                   <li className="nav-item">
-                    <button onClick={()=> this.createRoom(false)} className="btn btn-dark btn-lg btn-block">Private</button>
+                    <button onClick={()=> this.createRoom(false)} className="btn btn-primary btn-lg btn-block">Private</button>
                   </li>
                   <li className="nav-item">
                     <button onClick={this.toggleCreateOptions} className="btn btn-link btn-lg btn-block">Cancel</button>
@@ -110,8 +120,37 @@ class GameHome extends Component {
               }
             </div>
           </div>
+          <div className='row'>
+            <div className='col'>
+              <h5>How to Play</h5>
+              <ol>
+                {gameData.instructions.map((text, key) => (
+                  <li key={key}>{text}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+          {Object.getOwnPropertyNames(this.state.publicRooms).length > 0 ?
+            <div className='row mb-4'>
+              <div className='col'>
+                <h5>Public Rooms (click to join)</h5> 
+                <div className='list-group'>
+                  {Object.keys(this.state.publicRooms)
+                    .sort((a, b) => this.state.publicRooms[a] < this.state.publicRooms[b])
+                    .map((room, key) => {
+                      if (key >= 20) return null;
+                      return (
+                        <button key={key} className='list-group-item list-group-item-light list-group-item-action' onClick={()=>this.props.joinRoom(room)}>
+                          <strong>{gameData.formatRoomName ? gameData.formatRoomName(room) : room}</strong> | {this.state.publicRooms[room]} online
+                        </button>
+                      );
+                  })}
+                </div>
+              </div>
+            </div>
+          : null}
         </div>
-        {this.state.redirect ? <Redirect from={this.props.match.url} to={this.state.redirect} /> : null}
+        {this.state.newURL ? <Redirect from={this.props.match.url} to={this.state.newURL} /> : null}
       </div>
     );
   }

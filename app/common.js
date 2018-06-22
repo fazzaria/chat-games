@@ -170,7 +170,7 @@ function getPlayerSockets(roomCode) {
 }
 
 function gameHome(gameType, socket) {
-  if (typeof(gameType) !== String && !gameTypes[gameType]) return;
+  if (typeof(gameType) !== String || !gameTypes[gameType]) return;
   refreshPublicRooms(gameType);
   var handleGameHome = require('./games/' + gameType).handleGameHome;
   if (handleGameHome) handleGameHome(socket);

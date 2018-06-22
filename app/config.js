@@ -8,7 +8,6 @@ var gameOptions = {};
 gameOptions[gameTypes.SWF] = {
 	acceptWord: 'GOODBYE',
 	allowSockPuppets: true,
-	getLunarPhase: false,
 	maxChatMsgLength: 300,
 	maxRooms: 4500,
 	minPlayers: 0,
